@@ -2,10 +2,8 @@
 # and http://androidxref.com/source/xref/external/libnfc-nxp/src/phFriNfc_NdefRecord.c
 #   line 87 - phFriNfc_NdefRecord_GetRecords()
 
-import functools
 import struct
-
-import six
+import functools
 
 
 class InvalidNdef(Exception):
@@ -36,9 +34,9 @@ TNF_UNKNOWN = 0x05
 TNF_UNCHANGED = 0x06
 TNF_RESERVED = 0x07
 
-RTD_TEXT = six.b('T')
-RTD_URI = six.b('U')
-RTD_SMART_POSTER = six.b('Sp')
+RTD_TEXT = "T"
+RTD_URI = "U"
+RTD_SMART_POSTER = "Sp"
 
 RTD_URI_ABBRIV_NUM = 35
 
@@ -60,9 +58,10 @@ class BufferReader(object):
     def _read(self, size):
         try:
             res = struct.unpack_from(SIZE2STRUCT[size], self.buffer, self.offset)
-        except struct.error:
+        except:#struct.error:
             raise InvalidNdef('not enough bytes')
-        self.offset += int(size / 8)
+        # self.offset += size / 8
+        self.offset += size // 8
         return res[0]
 
     def read(self, size):
@@ -78,7 +77,7 @@ class BufferReader(object):
 
 class BufferWriter(object):
     def __init__(self):
-        self.buffer = six.b('')
+        self.buffer = b''
 
         for size in SIZE2STRUCT:
             setattr(self, 'write_%d' % size, functools.partial(self._write, size))
@@ -86,13 +85,10 @@ class BufferWriter(object):
     def _write(self, size, data):
         try:
             self.buffer += struct.pack(SIZE2STRUCT[size], data)
-        except struct.error:
+        except: #struct.error:
             raise InvalidNdef('bad number')
 
-    def write_str(self, data):
-        self.buffer += data.encode('utf-8')
-
-    def write_bytes(self, data):
+    def write(self, data):
         self.buffer += data
 
     def get(self):
@@ -183,20 +179,22 @@ class NdefRecord(object):
                     raise InvalidNdefRecord('RTD_TEXT payload missing status byte')
 
                 encoding = 'utf-8'
-                if six.byte2int(self.payload) & 0x80:
+                #if ord(self.payload[0]) & 0x80:
+                if ord(self.payload[0]) & 0x80:
                     encoding = 'utf-16'
 
-                language_len = six.byte2int(self.payload) & 0x1f
+                language_len = ord(self.payload[0]) & 0x1f
+                print(f"language_len: {language_len}, payload_len: {self.payload_len} ord payload: {ord(self.payload[0])}")
                 if self.payload_len < 1 + language_len:
                     raise InvalidNdefRecord('RTD_TEXT contains invalid language code length')
 
                 try:
-                    self.payload[1:1 + language_len].decode('us-ascii')
+                    bytes(self.payload[1:1 + language_len],'ascii').decode('us-ascii')
                 except UnicodeDecodeError:
                     raise InvalidNdefRecord('RTD_TEXT contains language code with invalid encoding')
 
                 try:
-                    self.payload[language_len + 1:].decode(encoding)
+                    bytes(self.payload[language_len + 1:],'ascii').decode(encoding)
                 except UnicodeDecodeError:
                     raise InvalidNdefRecord('RTD_TEXT payload failed to decode as ' + encoding)
 
@@ -204,11 +202,11 @@ class NdefRecord(object):
                 if len(self.payload) == 0:
                     raise InvalidNdefRecord('RTD_URI payload missing status byte')
 
-                if six.byte2int(self.payload) > RTD_URI_ABBRIV_NUM:
+                if ord(self.payload[0]) > RTD_URI_ABBRIV_NUM:
                     raise InvalidNdefRecord('RTD_URI payload starts with an invalid URI identifier code')
 
                 try:
-                    self.payload[1:].decode('utf-8')
+                    bytes(self.payload[1:],'ascii').decode('utf-8')
                 except UnicodeDecodeError:
                     raise InvalidNdefRecord('RTD_URI payload failed to decode as utf-8')
 
@@ -242,10 +240,10 @@ class NdefRecord(object):
             w.write_32(self.payload_len)
         if self.flags.id:
             w.write_8(self.id_len)
-        w.write_bytes(self.type)
+        w.write(self.type)
         if self.flags.id:
-            w.write_bytes(self.id)
-        w.write_bytes(self.payload)
+            w.write(self.id)
+        w.write(self.payload)
         return w.get()
 
     def _raw_flags(self):
@@ -285,7 +283,7 @@ class NdefMessage(object):
         self._verify_android_specific()
 
     def to_buffer(self):
-        return six.b('').join(r.to_buffer() for r in self.records)
+        return b''.join(r.to_buffer() for r in self.records)
 
     def _verify_records(self):
         for r in self.records:
@@ -386,18 +384,29 @@ def _url_ndef_abbrv(url):
 
     for i, abbr in enumerate(abbrv_table):
         if url.startswith(abbr):
-            return six.int2byte(i + 1) + url[len(abbr):].encode('utf-8')
+            return chr(i + 1) + bytes(url[len(abbr):],'utf-8').decode()
 
-    return six.int2byte(0) + url.encode('utf-8')
+    return chr(0) + bytes(url,'utf-8').decode()
 
 
 def new_smart_poster(title, url):
     records = [
-        (TNF_WELL_KNOWN, RTD_URI, six.b(''), _url_ndef_abbrv(url)),
-        (TNF_WELL_KNOWN, six.b('act'), six.b(''), six.b('\x00')),
+        (TNF_WELL_KNOWN, RTD_URI, '', _url_ndef_abbrv(url)),
+        (TNF_WELL_KNOWN, "act", '', '\x00'),
     ]
     if title:
-        records.append((TNF_WELL_KNOWN, RTD_TEXT, six.b(''), six.b('\x02en') + title.encode('utf-8')))
+        records.append((TNF_WELL_KNOWN, RTD_TEXT, '', '\x02en' + bytes(title,'utf-8').decode()))
     internal_message = new_message(*records)
     raw_internal = internal_message.to_buffer()
-    return new_message((TNF_WELL_KNOWN, RTD_SMART_POSTER, six.b(''), raw_internal))
+    return new_message((TNF_WELL_KNOWN, RTD_SMART_POSTER, '', raw_internal))
+
+def smart_poster_record(title,url):
+    records = [
+        (TNF_WELL_KNOWN, RTD_URI, '', _url_ndef_abbrv(url)),
+        (TNF_WELL_KNOWN, "act", '', '\x00'),
+    ]
+    if title:
+        records.append((TNF_WELL_KNOWN, RTD_TEXT, '', '\x02en' + bytes(title,'utf-8').decode()))
+    return records
+def text_record(title, text):
+    return (TNF_WELL_KNOWN, RTD_TEXT, title, '\x02en'+bytes(text,'utf-8').decode())
